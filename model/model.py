@@ -39,7 +39,7 @@ class Flare:
         
         return inputs
 
-    def predict(self, predict_text: str) -> Dict[str. Any]:
+    def predict(self, predict_text: str) -> Dict[str, Any]:
         inputs = self.tokenize_input(predict_text)
         with torch.no_grad():
             outputs = self.model(**inputs)
@@ -52,10 +52,10 @@ class Flare:
         else: 
             predicted_clas: str = "legitamate"
         return {
-            'legitimate': legitimate_prob,
-            'phishing': phishing_prob,
+            'legitimate': legitimate_probability,
+            'phishing': phishing_probability,
             'predicted': predicted_class,
-            'confidence': max(legitimate_prob, phishing_prob)
+            'confidence': max(legitimate_probability, phishing_probability)
         }
 
 if __name__ == "__main__":
@@ -63,7 +63,7 @@ if __name__ == "__main__":
 
     test = "Congrats you won $100000. Click here to claim your prize"
 
-    result = detector.predict(test)
+    result = detector.predict(test):
     print("Prediction:")
     print(f"Legitimate: {result['legitimate']:.4f} ({result['legitimate']*100:.2f}%)")
     print(f"Phishing:   {result['phishing']:.4f} ({result['phishing']*100:.2f}%)")
