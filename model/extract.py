@@ -1,30 +1,33 @@
 import pandas as pd
-from pathlib import Path
 import torch
+from sklearn.model_selection import train_test_split
+from config import TEST_SIZE, VALIDATE_SIZE, RANDOM_STATE
+from config import BASE_DIR, DATA_DIR, MODEL_DIR, DATA_FILE
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
-MODEL_DIR = BASE_DIR / "model"
 
 class Extract:
     def __init__(self) -> None:
-        self.df = pd.read_csv(DATA_DIR / "data.csv")
+        self.df = pd.read_csv(DATA_DIR / DATA_FILE)
     
     # Prints missing values as percentage
     def get_missing_values(self) -> pd.Series: 
         return round((self.df.isnull().sum() / self.df.shape[0]) * 100, 2)
 
     def clean_data(self) -> pd.DataFrame:
-        self.df = self.df.dropna(subset=["message_body"])
-        self.df["sender"] = self.df["sender"].fillna("")
-        self.df["url"] = self.df["url"].fillna("")
+        self.df = self.df.dropna(subset=["body"])
         self.df["label"] = self.df["label"].astype(int)
-        self.df = self.df.drop_duplicates(subset=["message_body"])
+        self.df = self.df.drop_duplicates(subset=["body"])
         return self.df
 
     def get_clean_data(self) -> pd.DataFrame:
         self.clean_data()
-        return self.df[["message_body", "label"]]
+        return self.df[["body", "label"]]
+
+    def get_splits(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        clean_df = self.get_clean_data()
+        train_df, temp_df = train_test_split(clean_df, test_size = TEST_SIZE, random_state = RANDOM_STATE, stratify=clean_df['label'])
+        val_df, test_df = train_test_split(temp_df, test_size = VALIDATE_SIZE, random_state = RANDOM_STATE, stratify=temp_df['label'])
+        return train_df, val_df, test_df
 
 if __name__ == "__main__":
     extractor = Extract()

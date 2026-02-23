@@ -2,8 +2,9 @@ import torch
 from torch.utils.data import Dataset
 from transformers import DistilBertTokenizer
 import pandas as pd
+from typing import Dict
 
-class PhishingDataset():
+class PhishingDataset(Dataset):
     def __init__(self, dataframe: pd.DataFrame, tokenizer: DistilBertTokenizer, max_length: int = 512) -> None:
         # Just resets index after preprocessing
         self.df = dataframe.reset_index(drop=True)
@@ -15,7 +16,7 @@ class PhishingDataset():
         return len(self.df)
 
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
-        text = self.df.iloc[index]["message_body"]
+        text = self.df.iloc[index]["body"]
         label = self.df.iloc[index]["label"]
 
         #Tokenize this one sample on-the-fly
@@ -28,7 +29,7 @@ class PhishingDataset():
         return {
             "input_ids": encoding["input_ids"],
             "attention_mask": encoding["attention_mask"],
-            "labels": label
+            "labels": torch.tensor(label, dtype=torch.long)
         }
 
 if __name__ == "__main__":
