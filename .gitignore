@@ -5,3 +5,4 @@ venv/
 .cache/
 data/.~lock.*#
 .ipynb_checkpoints/
+saved_model/
