@@ -28,7 +28,7 @@ def get_dataloaders() -> Tuple[DataLoader, DataLoader, DataLoader, DistilBertTok
     return train_loader, val_loader, test_loader, tokenizer
 
 def build_model(model_name: str = MODEL_NAME) -> Tuple[DistilBertForSequenceClassification, torch.device]:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     print(f"Using {device}")
 
     model = DistilBertForSequenceClassification.from_pretrained(

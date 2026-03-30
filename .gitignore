@@ -6,3 +6,4 @@ venv/
 data/.~lock.*#
 .ipynb_checkpoints/
 saved_model/
+*.md
