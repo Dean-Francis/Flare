@@ -10,6 +10,7 @@ import torch
 from torch.optim import AdamW
 from typing import Tuple
 from tqdm import tqdm
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 def get_dataloaders() -> Tuple[DataLoader, DataLoader, DataLoader, DistilBertTokenizer]:
     extractor = Extract()
     train_df, val_df, test_df = extractor.get_splits()
@@ -41,8 +42,15 @@ def build_model(model_name: str = MODEL_NAME) -> Tuple[DistilBertForSequenceClas
     model = model.to(device)
     return model, device
 
+def save_model(model, tokenizer):
+    SAVED_MODEL_DIR.mkdir(parents = True, exist_ok = True)
+    model.save_pretrained(SAVED_MODEL_DIR)
+    tokenizer.save_pretrained(SAVED_MODEL_DIR)
+
 def train(model, train_loader, val_loader, device, tokenizer):
-    optimizer = AdamW(model.parameters(), lr = LEARNING_RATE) 
+    optimizer = AdamW(model.parameters(), lr = LEARNING_RATE)
+    best_recall = 0.0
+
     for epoch in range(EPOCHS):
         model.train()
         total_train_loss = 0
@@ -51,7 +59,7 @@ def train(model, train_loader, val_loader, device, tokenizer):
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
             labels = batch['labels'].to(device)
-            
+
             optimizer.zero_grad()
 
             outputs = model(input_ids = input_ids, attention_mask = attention_mask, labels = labels)
@@ -63,28 +71,50 @@ def train(model, train_loader, val_loader, device, tokenizer):
             total_train_loss += loss.item()
 
         average_train_loss = total_train_loss / len(train_loader)
-        avg_val_loss = validate(model, val_loader, device)
-        
+        avg_val_loss, val_predictions, val_labels = validate(model, val_loader, device)
+        metrics = compute_metrics(val_labels, val_predictions)
+
         print(f"Epoch {epoch+1}/{EPOCHS} | Train Loss: {average_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
-        
-        SAVED_MODEL_DIR.mkdir(parents = True, exist_ok = True)
-        model.save_pretrained(SAVED_MODEL_DIR)
-        tokenizer.save_pretrained(SAVED_MODEL_DIR)
-        
-def validate(model, val_loader, device):
-    model.eval()
-    total_val_loss = 0
-    
+        print(f"Accuracy: {metrics['accuracy']:.4f} | F1: {metrics['f1']:.4f} | Precision: {metrics['precision']:.4f} | Recall: {metrics['recall']:.4f}")
+        print(f"Confusion Matrix:\n{metrics['confusion_matrix']}")
+
+        if metrics['recall'] > best_recall:
+            best_recall = metrics['recall']
+            save_model(model, tokenizer)
+            print(f"New best recall: {best_recall:.4f} — model saved")
+       
+def compute_metrics(labels, predictions) -> dict:
+    return {
+        'accuracy':         accuracy_score(labels, predictions),
+        'precision':        precision_score(labels, predictions),
+        'recall':           recall_score(labels, predictions),
+        'f1':               f1_score(labels, predictions),
+        'confusion_matrix': confusion_matrix(labels, predictions)
+    }
+
+def collect_predictions(model, data_loader, device) -> Tuple[float, list,  list]:
+    all_predictions = []
+    all_labels = []
+    total_loss = 0
+
     with torch.no_grad():
-        for batch in val_loader:
+        for batch in data_loader:
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
             labels = batch['labels'].to(device)
-            
-            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-            total_val_loss += outputs.loss.item()
-    
-    return total_val_loss / len(val_loader)
+
+            outputs = model(input_ids = input_ids, attention_mask = attention_mask, labels = labels)
+            predictions = torch.argmax(outputs.logits, dim = -1)
+
+            total_loss += outputs.loss.item()
+            all_predictions.extend(predictions.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+
+    return total_loss / len(data_loader), all_predictions, all_labels
+
+def validate(model, val_loader, device):
+    model.eval()
+    return collect_predictions(model, val_loader, device)
 
 if __name__ == "__main__":
     train_loader, val_loader, test_loader, tokenizer = get_dataloaders()
