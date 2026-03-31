@@ -1,4 +1,5 @@
 import torch
+from typing import Dict, Any
 from transformers import DistilBertForSequenceClassification, DistilBertTokenizer
 
 class Flare:
@@ -50,7 +51,7 @@ class Flare:
         if phishing_probability > legitimate_probability:
             predicted_class: str = "phishing"
         else: 
-            predicted_clas: str = "legitamate"
+            predicted_class: str = "legitimate"
         return {
             'legitimate': legitimate_probability,
             'phishing': phishing_probability,
@@ -63,7 +64,7 @@ if __name__ == "__main__":
 
     test = "Congrats you won $100000. Click here to claim your prize"
 
-    result = detector.predict(test):
+    result = detector.predict(test)
     print("Prediction:")
     print(f"Legitimate: {result['legitimate']:.4f} ({result['legitimate']*100:.2f}%)")
     print(f"Phishing:   {result['phishing']:.4f} ({result['phishing']*100:.2f}%)")
