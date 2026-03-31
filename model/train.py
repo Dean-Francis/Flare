@@ -4,7 +4,6 @@ from dataset import PhishingDataset
 from extract import Extract
 from config import BATCH_SIZE, MODEL_NAME
 from config import EPOCHS, LEARNING_RATE
-from pathlib import Path
 from config import SAVED_MODEL_DIR
 import torch
 from torch.optim import AdamW
@@ -41,6 +40,39 @@ def build_model(model_name: str = MODEL_NAME) -> Tuple[DistilBertForSequenceClas
 
     model = model.to(device)
     return model, device
+
+def compute_metrics(labels, predictions) -> dict:
+    return {
+        'accuracy':         accuracy_score(labels, predictions),
+        'precision':        precision_score(labels, predictions),
+        'recall':           recall_score(labels, predictions),
+        'f1':               f1_score(labels, predictions),
+        'confusion_matrix': confusion_matrix(labels, predictions)
+    }
+
+def collect_predictions(model, data_loader, device) -> Tuple[float, list, list]:
+    all_predictions = []
+    all_labels = []
+    total_loss = 0
+
+    with torch.no_grad():
+        for batch in data_loader:
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            labels = batch['labels'].to(device)
+
+            outputs = model(input_ids = input_ids, attention_mask = attention_mask, labels = labels)
+            predictions = torch.argmax(outputs.logits, dim = -1)
+
+            total_loss += outputs.loss.item()
+            all_predictions.extend(predictions.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+
+    return total_loss / len(data_loader), all_predictions, all_labels
+
+def validate(model, val_loader, device):
+    model.eval()
+    return collect_predictions(model, val_loader, device)
 
 def save_model(model, tokenizer):
     SAVED_MODEL_DIR.mkdir(parents = True, exist_ok = True)
@@ -83,38 +115,6 @@ def train(model, train_loader, val_loader, device, tokenizer):
             save_model(model, tokenizer)
             print(f"New best recall: {best_recall:.4f} — model saved")
        
-def compute_metrics(labels, predictions) -> dict:
-    return {
-        'accuracy':         accuracy_score(labels, predictions),
-        'precision':        precision_score(labels, predictions),
-        'recall':           recall_score(labels, predictions),
-        'f1':               f1_score(labels, predictions),
-        'confusion_matrix': confusion_matrix(labels, predictions)
-    }
-
-def collect_predictions(model, data_loader, device) -> Tuple[float, list,  list]:
-    all_predictions = []
-    all_labels = []
-    total_loss = 0
-
-    with torch.no_grad():
-        for batch in data_loader:
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
-            labels = batch['labels'].to(device)
-
-            outputs = model(input_ids = input_ids, attention_mask = attention_mask, labels = labels)
-            predictions = torch.argmax(outputs.logits, dim = -1)
-
-            total_loss += outputs.loss.item()
-            all_predictions.extend(predictions.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
-
-    return total_loss / len(data_loader), all_predictions, all_labels
-
-def validate(model, val_loader, device):
-    model.eval()
-    return collect_predictions(model, val_loader, device)
 
 if __name__ == "__main__":
     train_loader, val_loader, test_loader, tokenizer = get_dataloaders()
