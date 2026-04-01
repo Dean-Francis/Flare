@@ -1,3 +1,7 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from transformers import DistilBertTokenizer, DataCollatorWithPadding, DistilBertForSequenceClassification
 from torch.utils.data import DataLoader
 from dataset import PhishingDataset
