@@ -38,3 +38,4 @@ def count_flagged_emails() -> int:
 if __name__ == "__main__":
     init_db()
     print("Database Initialized")
+
