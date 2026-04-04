@@ -180,8 +180,8 @@ If the deadline passes with fewer than `MIN_CLIENTS` updates, the round is skipp
 
 ## Data
 
-- **Current dataset**: 309K emails in `data/raw_data.csv`. Named entities replaced with bracketed placeholders (`[NAME]`, `[DATE]`, `[ADDRESS]`). Nearly balanced: ~50.6% phishing, ~49.4% benign.
-- **Initial global model dataset**: 10K samples drawn from `data/raw_data.csv` will be used to pre-train the first version of the global model that gets distributed to users on install.
+- **Current dataset**: `data/raw_data.csv` contains ~10K emails. Named entities replaced with bracketed placeholders (`[NAME]`, `[DATE]`, `[ADDRESS]`). Nearly balanced classes.
+- **Initial global model**: This 10K dataset is used to pre-train the first version of the global model distributed to users on install.
 - **Local training data**: User-flagged emails stored on-device. Distribution will be non-IID across clients (realistic — different users encounter different email patterns).
 
 ---
