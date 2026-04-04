@@ -47,7 +47,7 @@ Raw email data never leaves the user's device. Only model weight updates are sen
 ### What Exists
 - DistilBERT fine-tuned for binary phishing/benign email classification
 - Centralized training pipeline
-- 309K labeled email dataset (columns: `body`, `label`) — used for initial model training
+- ~10K labeled email dataset (columns: `body`, `label`) — used for initial model training
 - Inference class (`Flare`) — bugs fixed
 - **Central server** (FastAPI) — fully built with FedAvg aggregation, hybrid threshold/timeout round management, and SQLite-backed persistence
 - **Local client server** (FastAPI) — fully built with inference, email flagging, local training pipeline, and model hot-reloading
@@ -64,7 +64,7 @@ Raw email data never leaves the user's device. Only model weight updates are sen
 ```
 Flare/
 ├── data/
-│   └── raw_data.csv              # 309K emails: columns = body (str), label (int: 0=benign, 1=phishing)
+│   └── raw_data.csv              # ~10K emails: columns = body (str), label (int: 0=benign, 1=phishing)
 ├── model/
 │   ├── extract.py                # Loads, cleans, splits data (Extract class)
 │   ├── dataset.py                # PyTorch Dataset with on-the-fly tokenization (PhishingDataset)
@@ -82,7 +82,6 @@ Flare/
 │   └── schemas.py                # Pydantic schemas: PredictRequest/Response, FlagRequest/Response
 ├── saved_model/                  # Model checkpoints saved here after training
 ├── config.py                     # All hyperparameters and paths — single source of truth
-├── CLAUDE.md                     # Guidance for Claude Code
 ├── requirements.txt
 └── README.md
 ```
