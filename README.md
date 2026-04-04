@@ -12,7 +12,7 @@ Flare is a graduation project. It is a hybrid federated learning system for phis
 [Central Server]
  - Hosts global DistilBERT model (pre-trained on separate 10K dataset)
  - Exposes REST API for: model download, receiving weight updates
- - Runs FedAvg aggregation on a weekly schedule
+ - Runs FedAvg aggregation on a hybrid threshold/timeout schedule
  - Distributes updated global model to connecting clients
 
         ↕  weight updates (no raw email data ever leaves local)
@@ -22,9 +22,9 @@ Flare is a graduation project. It is a hybrid federated learning system for phis
  - On first install: pulls latest global model from central server
  - Exposes REST API on localhost for the browser extension
  - Runs inference on emails sent from the extension
- - Stores user-flagged emails locally
+ - Stores user-flagged emails locally in SQLite
  - Triggers local training once N emails have been flagged
- - Sends weight updates to central server on a weekly schedule
+ - Sends weight updates to central server after local training
 
         ↕  email text / prediction result
 
@@ -46,16 +46,16 @@ Raw email data never leaves the user's device. Only model weight updates are sen
 
 ### What Exists
 - DistilBERT fine-tuned for binary phishing/benign email classification
-- Centralized training pipeline (no FL yet)
-- 309K labeled email dataset (columns: `body`, `label`) — used for current development/testing
-- Inference class (`Flare`)
+- Centralized training pipeline
+- 309K labeled email dataset (columns: `body`, `label`) — used for initial model training
+- Inference class (`Flare`) — bugs fixed
+- **Central server** (FastAPI) — fully built with FedAvg aggregation, hybrid threshold/timeout round management, and SQLite-backed persistence
+- **Local client server** (FastAPI) — fully built with inference, email flagging, local training pipeline, and model hot-reloading
 
 ### What Does Not Exist Yet
-- Federated learning infrastructure (local server, central server, aggregation)
-- REST APIs (local or central)
-- Weekly round scheduler
-- Local data storage and training trigger
-- Full evaluation metrics (only loss is tracked currently)
+- End-to-end federated loop: client does not yet send weight deltas to the central server after local training, and does not pull the updated global model back from central
+- Browser extension (SE team scope)
+- Full evaluation metrics (only loss tracked in training loop)
 
 ---
 
@@ -66,13 +66,22 @@ Flare/
 ├── data/
 │   └── raw_data.csv              # 309K emails: columns = body (str), label (int: 0=benign, 1=phishing)
 ├── model/
-│   ├── config.py                 # All hyperparameters and paths — single source of truth
 │   ├── extract.py                # Loads, cleans, splits data (Extract class)
 │   ├── dataset.py                # PyTorch Dataset with on-the-fly tokenization (PhishingDataset)
 │   ├── train.py                  # Training loop, validation, model saving
-│   ├── flare.py                  # Inference class (Flare) — has known bugs (see below)
-│   └── Test.ipynb                # Exploratory notebook
-├── saved_model/                  # Model checkpoints saved here after each epoch
+│   └── flare.py                  # Inference class (Flare)
+├── server/
+│   ├── main.py                   # Central server FastAPI app (POST /update, GET /round, GET /model)
+│   ├── aggregator.py             # FedAvg aggregation, round lifecycle, threading.Timer scheduler
+│   ├── database.py               # SQLAlchemy models: Round, WeightUpdate
+│   └── schemas.py                # Pydantic schemas: UpdateRequest, UpdateResponse, RoundResponse
+├── client/
+│   ├── main.py                   # Local client FastAPI app (POST /predict, POST /flag)
+│   ├── trainer.py                # Local training pipeline — fine-tunes on flagged emails
+│   ├── database.py               # SQLAlchemy model: FlaggedEmail
+│   └── schemas.py                # Pydantic schemas: PredictRequest/Response, FlagRequest/Response
+├── saved_model/                  # Model checkpoints saved here after training
+├── config.py                     # All hyperparameters and paths — single source of truth
 ├── CLAUDE.md                     # Guidance for Claude Code
 ├── requirements.txt
 └── README.md
@@ -80,18 +89,25 @@ Flare/
 
 ---
 
-## Key Configuration (`model/config.py`)
+## Key Configuration (`config.py`)
 
 | Parameter | Value | Notes |
 |---|---|---|
 | `MODEL_NAME` | `distilbert-base-uncased` | HuggingFace model |
 | `BATCH_SIZE` | 16 | |
-| `EPOCHS` | 5 | |
+| `EPOCHS` | 5 | Central training epochs |
+| `LOCAL_EPOCHS` | 3 | Local client fine-tuning epochs |
 | `LEARNING_RATE` | 2e-5 | Standard fine-tuning LR |
-| `MAX_LENGTH` | 128 | Tokenizer max length for training |
+| `MAX_LENGTH` | 128 | Tokenizer max length |
 | `TEST_SIZE` | 0.2 | 20% held out first |
 | `VALIDATE_SIZE` | 0.5 | 50% of that → results in 80/10/10 split |
 | `SAVED_MODEL_DIR` | `<root>/saved_model/` | |
+| `FLAG_THRESHOLD` | 50 | Flagged emails needed to trigger local training |
+| `AGGREGATION_THRESHOLD` | 5 | Weight updates needed to trigger early aggregation |
+| `MIN_CLIENTS` | 2 | Minimum updates needed at deadline to aggregate (else skip round) |
+| `ROUND_TIMEOUT` | 86400 | Round deadline in seconds (24 hours) |
+| `CLIENT_PORT` | 8000 | Local client server port |
+| `CENTRAL_PORT` | 8001 | Central server port |
 
 ---
 
@@ -102,53 +118,63 @@ Flare/
 
 ---
 
-## Known Bugs (Fix Before Building FL)
+## Central Server API
 
-### `model/flare.py`
-1. **Line 53** — typo: `predicted_clas` should be `predicted_class`. This causes a `NameError` when the email is classified as legitimate.
-2. **Line 66** — syntax error: `detector.predict(test):` has a trailing colon, should be `detector.predict(test)`.
-3. **Missing imports** — `Dict` and `Any` are used in type hints but never imported from `typing`.
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/update` | Receive a weight update from a client. Body: `{user_id, weights (base64), num_samples}`. Returns `409` if user already submitted this round. |
+| `GET` | `/round` | Returns the current open round ID. |
+| `GET` | `/model` | Long-polls until the model is ready (post-aggregation), then streams the model file. |
 
-### `model/extract.py`
-4. **Line 26** — `Tuple` is used in the return type hint of `get_splits()` but never imported from `typing`.
+### Round Lifecycle
+A round starts on server boot (or after the previous round closes). It closes when either:
+- `AGGREGATION_THRESHOLD` updates are received (early trigger), or
+- `ROUND_TIMEOUT` seconds elapse and at least `MIN_CLIENTS` updates exist
+
+If the deadline passes with fewer than `MIN_CLIENTS` updates, the round is skipped and a new one opens.
+
+---
+
+## Local Client API
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/predict` | Run inference on an email. Body: `{body}`. Returns probabilities + predicted class. |
+| `POST` | `/flag` | Store a user-flagged email. Body: `{user_id, body, label}`. Triggers local training when flagged count hits `FLAG_THRESHOLD`. |
 
 ---
 
 ## Implementation Roadmap
 
-### Phase 1 — Fix & Validate Base Model (current priority)
-- Fix all 4 bugs listed above
-- Add evaluation metrics: accuracy, F1, precision, recall, confusion matrix
-- Run full evaluation on test set
-- Confirm model performance is solid before adding FL
+### Phase 1 — Fix & Validate Base Model ✓
+- All 4 bugs fixed in `flare.py` and `extract.py`
+- Remaining: full evaluation metrics (accuracy, F1, precision, recall, confusion matrix)
 
-### Phase 2 — Local Server
-- FastAPI server running on localhost
-- `POST /predict` — receives email text, returns classification + confidence
-- Local SQLite or flat-file storage for flagged emails
-- Local training pipeline triggered once N flagged emails are accumulated
-- Pluggable N threshold (configurable)
+### Phase 2 — Local Server ✓
+- `POST /predict` — inference on email text
+- `POST /flag` — stores flagged email, triggers local training at threshold
+- Local SQLite storage for flagged emails
+- Local training pipeline (`trainer.py`) with model hot-reload after training
 
-### Phase 3 — Central Server
-- FastAPI server
-- `GET /model` — returns latest global model weights
-- `POST /weights` — receives weight update from a local server
-- FedAvg aggregation logic — designed to be swappable with FedProx
-- Weekly round scheduler
+### Phase 3 — Central Server ✓
+- `POST /update`, `GET /round`, `GET /model` endpoints
+- FedAvg aggregation
+- Hybrid threshold/timeout round trigger
+- SQLite-backed round and weight update persistence
+- `threading.Timer` deadline scheduling with graceful restart on server boot
 
-### Phase 4 — Federated Loop
-- Local server trains on flagged data → serializes weight delta → POST to central
-- Central aggregates all received weights → updates global model
-- Local server pulls updated global model on weekly sync
-- End-to-end round validated
+### Phase 4 — Federated Loop (current priority)
+- After local training, serialize weight delta (local weights − global weights) and `POST /update` to central server
+- After aggregation completes, client pulls updated global model from `GET /model` and hot-reloads
+- End-to-end round validated: flag → train → send delta → aggregate → pull → hot-reload
 
 ---
 
 ## Aggregation Strategy
 
-- **Current target**: FedAvg (McMahan et al.)
-- **Future**: FedProx — the aggregation logic must be written as a pluggable/swappable component so switching requires minimal changes
-- **Privacy**: None for now (raw weights transmitted). Differential privacy and secure aggregation are planned for later iterations.
+- **Current**: FedAvg (McMahan et al.) — weighted average of weight deltas by `num_samples`
+- **Future**: FedProx — aggregation logic in `server/aggregator.py` should remain a swappable component
+- **Privacy**: None for now (raw weight deltas transmitted). Differential privacy and secure aggregation planned for later iterations.
 
 ---
 
@@ -162,7 +188,7 @@ Flare/
 
 ## Running the Code
 
-All scripts must be run from inside `model/` due to relative imports:
+All model scripts must be run from inside `model/` due to relative imports:
 
 ```bash
 cd model
@@ -171,11 +197,25 @@ python flare.py      # single inference test
 python extract.py    # inspect data pipeline
 ```
 
+Run the central server from the project root:
+
+```bash
+uvicorn server.main:app --host 0.0.0.0 --port 8001
+```
+
+Run the local client server from the `client/` directory:
+
+```bash
+cd client
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
 ---
 
 ## Tech Stack
 
 - Python, PyTorch, HuggingFace Transformers
 - DistilBERT (`distilbert-base-uncased`) — 67M parameters, 6-layer transformer
-- FastAPI — planned for both local and central servers
+- FastAPI + Uvicorn — both central and local servers
+- SQLAlchemy + SQLite — persistence for rounds, weight updates, and flagged emails
 - CUDA supported (torch+cu126 in requirements.txt)
