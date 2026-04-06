@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 
 from . import aggregator
 from config import AGGREGATION_THRESHOLD, ROUND_TIMEOUT, SAVED_MODEL_DIR
@@ -81,8 +81,13 @@ async def get_model():
     if not model_path.exists():
         model_path = Path(SAVED_MODEL_DIR) / "pytorch_model.bin"
 
-    return FileResponse(
-        str(model_path),
+    def iterfile():
+        with open(model_path, "rb") as f:
+            while chunk := f.read(1024 * 1024):
+                yield chunk
+
+    return StreamingResponse(
+        iterfile(),
         media_type="application/octet-stream",
-        filename=model_path.name,
+        headers={"Content-Disposition": f"attachment; filename={model_path.name}"},
     )

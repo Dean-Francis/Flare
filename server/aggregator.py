@@ -11,7 +11,7 @@ from transformers import AutoModelForSequenceClassification
 from config import SAVED_MODEL_DIR, MIN_CLIENTS, ROUND_TIMEOUT
 from .database import (
     close_round, create_round, count_updates_for_round,
-    delete_updates_for_round, get_updates_for_round,
+    delete_updates_for_round, get_updates_for_round, is_round_open,
 )
 
 # ── Global state ──────────────────────────────────────────────────────────────
@@ -78,6 +78,8 @@ def aggregate(round_id: int):
         return
 
     try:
+        if not is_round_open(round_id):
+            return
         updates = get_updates_for_round(round_id)
         model = _load_model()
         model = _fedavg(updates, model)
@@ -92,7 +94,7 @@ def aggregate(round_id: int):
 
 def _fedavg(updates, model) -> AutoModelForSequenceClassification:
     total_samples = sum(u.num_samples for u in updates)
-    deltas = [pickle.loads(u.weights) for u in updates]
+    deltas = [{k: v.cpu() for k, v in pickle.loads(u.weights).items()} for u in updates]
     state = model.state_dict()
 
     for key in state:

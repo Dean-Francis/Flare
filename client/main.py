@@ -6,10 +6,10 @@ import threading
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
-from config import FLAG_THRESHOLD, SAVED_MODEL_DIR, CLIENT_PORT
-from database import init_db, insert_flagged_email, count_flagged_emails
-from schemas import PredictRequest, PredictResponse, FlagRequest, FlagResponse
-from trainer import run_local_training
+from config import FLAG_THRESHOLD, CLIENT_MODEL_DIR, CLIENT_PORT
+from .database import init_db, insert_flagged_email, count_flagged_emails
+from .schemas import PredictRequest, PredictResponse, FlagRequest, FlagResponse
+from .trainer import run_local_training
 from model.flare import Flare
 
 
@@ -21,7 +21,7 @@ model_lock = threading.Lock()
 async def lifespan(app: FastAPI):
     global detector
     init_db()
-    detector = Flare(model_name=str(SAVED_MODEL_DIR))
+    detector = Flare(model_name=str(CLIENT_MODEL_DIR))
     yield
 
 
@@ -30,7 +30,7 @@ app = FastAPI(lifespan=lifespan)
 
 def reload_model():
     global detector
-    new_detector = Flare(model_name=str(SAVED_MODEL_DIR))
+    new_detector = Flare(model_name=str(CLIENT_MODEL_DIR))
     with model_lock:
         detector = new_detector
 

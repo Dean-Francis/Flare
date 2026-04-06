@@ -68,9 +68,24 @@ def insert_weight_update(round_id: int, user_id: str, weights: bytes, num_sample
         session.commit()
 
 
-def get_updates_for_round(round_id: int) -> list[WeightUpdate]:
+from dataclasses import dataclass
+
+@dataclass
+class WeightUpdateData:
+    num_samples: int
+    weights: bytes
+
+
+def is_round_open(round_id: int) -> bool:
     with SessionLocal() as session:
-        return session.query(WeightUpdate).filter(WeightUpdate.round_id == round_id).all()
+        round = session.query(Round).filter(Round.id == round_id).first()
+        return round is not None and round.status == "open"
+
+
+def get_updates_for_round(round_id: int) -> list[WeightUpdateData]:
+    with SessionLocal() as session:
+        rows = session.query(WeightUpdate).filter(WeightUpdate.round_id == round_id).all()
+        return [WeightUpdateData(num_samples=r.num_samples, weights=r.weights) for r in rows]
 
 
 def count_updates_for_round(round_id: int) -> int:

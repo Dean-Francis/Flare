@@ -4,6 +4,7 @@ __pycache__/
 venv/
 .cache/
 .ipynb_checkpoints/
+*-checkpoint.ipynb
 
 # Data
 data/.~lock.*#

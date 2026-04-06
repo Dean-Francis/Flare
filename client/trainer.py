@@ -2,28 +2,40 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import base64
+import copy
+import os
+import pickle
+import tempfile
+
 import pandas as pd
+import requests
 import torch
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import DistilBertForSequenceClassification, DistilBertTokenizer, DataCollatorWithPadding
 from typing import Callable, Optional
 
-from config import SAVED_MODEL_DIR, BATCH_SIZE, LEARNING_RATE, LOCAL_EPOCHS, MAX_LENGTH
-from database import SessionLocal, FlaggedEmail
+from config import CLIENT_MODEL_DIR, BATCH_SIZE, LEARNING_RATE, LOCAL_EPOCHS, MAX_LENGTH, SERVER_HOST, CENTRAL_PORT
+from .database import SessionLocal, FlaggedEmail
 from model.dataset import PhishingDataset
+
+SERVER_URL = f"http://{SERVER_HOST}:{CENTRAL_PORT}"
 
 
 def run_local_training(callback: Optional[Callable] = None):
     with SessionLocal() as session:
         emails = session.query(FlaggedEmail).all()
-
-    df = pd.DataFrame([{"body": e.body, "label": e.label} for e in emails])
+        user_id = emails[0].user_id
+        num_samples = len(emails)
+        df = pd.DataFrame([{"body": e.body, "label": e.label} for e in emails])
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tokenizer = DistilBertTokenizer.from_pretrained(str(SAVED_MODEL_DIR))
-    model = DistilBertForSequenceClassification.from_pretrained(str(SAVED_MODEL_DIR))
+    tokenizer = DistilBertTokenizer.from_pretrained(str(CLIENT_MODEL_DIR))
+    model = DistilBertForSequenceClassification.from_pretrained(str(CLIENT_MODEL_DIR))
     model = model.to(device)
+
+    original_state = copy.deepcopy(model.state_dict())
 
     dataset = PhishingDataset(df, tokenizer, max_length=MAX_LENGTH)
     collator = DataCollatorWithPadding(tokenizer=tokenizer)
@@ -43,8 +55,26 @@ def run_local_training(callback: Optional[Callable] = None):
             outputs.loss.backward()
             optimizer.step()
 
-    model.save_pretrained(str(SAVED_MODEL_DIR))
-    tokenizer.save_pretrained(str(SAVED_MODEL_DIR))
+    trained_state = model.state_dict()
+    delta = {k: trained_state[k] - original_state[k] for k in original_state}
+    weights_b64 = base64.b64encode(pickle.dumps(delta)).decode()
+
+    response = requests.post(f"{SERVER_URL}/update", json={
+        "user_id": user_id,
+        "weights": weights_b64,
+        "num_samples": num_samples,
+    })
+    response.raise_for_status()
+
+    global_model_response = requests.get(f"{SERVER_URL}/model", stream=True)
+    global_model_response.raise_for_status()
+
+    model_path = Path(CLIENT_MODEL_DIR) / "model.safetensors"
+    with tempfile.NamedTemporaryFile(delete=False, dir=CLIENT_MODEL_DIR, suffix=".tmp") as tmp:
+        tmp_path = tmp.name
+        for chunk in global_model_response.iter_content(chunk_size=8192):
+            tmp.write(chunk)
+    os.replace(tmp_path, model_path)
 
     if callback:
         callback()

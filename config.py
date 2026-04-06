@@ -10,6 +10,7 @@ DATA_DIR = BASE_DIR / "data"
 MODEL_DIR = BASE_DIR / "model"
 DATA_FILE = "raw_data.csv"
 SAVED_MODEL_DIR = BASE_DIR / "saved_model"
+CLIENT_MODEL_DIR = BASE_DIR / "client" / "saved_model"
 DATABASE_URL = "sqlite:///" + str(BASE_DIR / "client" / "flare_client.db")
 
 # MODEL
@@ -24,14 +25,15 @@ LEARNING_RATE = 2e-5
 MAX_LENGTH = 128
 
 # Client
-FLAG_THRESHOLD = 50
+SERVER_HOST = "localhost" # Change Later -Dean
+FLAG_THRESHOLD = 3 # Original Value 50
 LOCAL_EPOCHS = 3
 CLIENT_PORT = 8000
 CENTRAL_PORT = 8001
 
 # Server
-AGGREGATION_THRESHOLD = 5
-MIN_CLIENTS = 2
+AGGREGATION_THRESHOLD = 2
+MIN_CLIENTS = 1
 ROUND_TIMEOUT = 86400
 SERVER_DATABASE_URL = "sqlite:///" + str(BASE_DIR / "server" / "flare_server.db")
 
