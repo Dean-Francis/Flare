@@ -1,11 +1,7 @@
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 from transformers import DistilBertTokenizer, DataCollatorWithPadding, DistilBertForSequenceClassification
 from torch.utils.data import DataLoader
-from dataset import PhishingDataset
-from extract import Extract
+from .dataset import PhishingDataset
+from .extract import Extract
 from config import BATCH_SIZE, MODEL_NAME
 from config import EPOCHS, LEARNING_RATE
 from config import SAVED_MODEL_DIR

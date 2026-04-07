@@ -1,7 +1,3 @@
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 import asyncio
 import pickle
 import threading
@@ -82,7 +78,11 @@ def aggregate(round_id: int):
             return
         updates = get_updates_for_round(round_id)
         model = _load_model()
-        model = _fedavg(updates, model)
+        try:
+            model = _fedavg(updates, model)
+        except ValueError:
+            _skip_round(round_id)
+            return
         _save_model(model)
         delete_updates_for_round(round_id)
         close_round(round_id)
@@ -93,14 +93,26 @@ def aggregate(round_id: int):
 
 
 def _fedavg(updates, model) -> AutoModelForSequenceClassification:
-    total_samples = sum(u.num_samples for u in updates)
-    deltas = [{k: v.cpu() for k, v in pickle.loads(u.weights).items()} for u in updates]
     state = model.state_dict()
+    expected_keys = set(state.keys())
+
+    valid_deltas = []
+    valid_updates = []
+    for u in updates:
+        delta = {k: v.cpu() for k, v in pickle.loads(u.weights).items()}
+        if set(delta.keys()) == expected_keys:
+            valid_deltas.append(delta)
+            valid_updates.append(u)
+
+    if not valid_deltas:
+        raise ValueError("No valid weight updates after key validation — all deltas had mismatched keys")
+
+    total_samples = sum(u.num_samples for u in valid_updates)
 
     for key in state:
         weighted_sum = sum(
             delta[key] * (u.num_samples / total_samples)
-            for delta, u in zip(deltas, updates)
+            for delta, u in zip(valid_deltas, valid_updates)
         )
         state[key] = state[key] + weighted_sum
 

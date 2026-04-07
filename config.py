@@ -26,13 +26,13 @@ MAX_LENGTH = 128
 
 # Client
 SERVER_HOST = "localhost" # Change Later -Dean
-FLAG_THRESHOLD = 3 # Original Value 50
+FLAG_THRESHOLD = 50
 LOCAL_EPOCHS = 3
 CLIENT_PORT = 8000
 CENTRAL_PORT = 8001
 
 # Server
-AGGREGATION_THRESHOLD = 2
+AGGREGATION_THRESHOLD = 1
 MIN_CLIENTS = 1
 ROUND_TIMEOUT = 86400
 SERVER_DATABASE_URL = "sqlite:///" + str(BASE_DIR / "server" / "flare_server.db")

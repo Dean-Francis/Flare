@@ -1,11 +1,8 @@
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 import asyncio
 import base64
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -56,7 +53,11 @@ async def submit_update(req: UpdateRequest, background_tasks: BackgroundTasks):
     if has_user_submitted(round_id, req.user_id):
         raise HTTPException(status_code=409, detail="Already submitted for this round")
 
-    weights_bytes = base64.b64decode(req.weights)
+    try:
+        weights_bytes = base64.b64decode(req.weights)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64-encoded weights")
+
     insert_weight_update(round_id, req.user_id, weights_bytes, req.num_samples)
 
     count = count_updates_for_round(round_id)
@@ -79,7 +80,7 @@ async def get_model():
 
     model_path = Path(SAVED_MODEL_DIR) / "model.safetensors"
     if not model_path.exists():
-        model_path = Path(SAVED_MODEL_DIR) / "pytorch_model.bin"
+        raise RuntimeError(f"Model file not found: {model_path}")
 
     def iterfile():
         with open(model_path, "rb") as f:

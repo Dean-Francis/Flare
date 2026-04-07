@@ -33,7 +33,7 @@ class PhishingDataset(Dataset):
         }
 
 if __name__ == "__main__":
-    from extract import Extract
+    from model.extract import Extract
     from transformers import DataCollatorWithPadding
     from torch.utils.data import DataLoader
 
