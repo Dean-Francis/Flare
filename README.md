@@ -55,7 +55,6 @@ Raw email data never leaves the user's device. Only model weight updates are sen
 ### What Does Not Exist Yet
 - End-to-end federated loop: client does not yet send weight deltas to the central server after local training, and does not pull the updated global model back from central
 - Browser extension (SE team scope)
-- Full evaluation metrics (only loss tracked in training loop)
 
 ---
 
@@ -69,7 +68,8 @@ Flare/
 │   ├── extract.py                # Loads, cleans, splits data (Extract class)
 │   ├── dataset.py                # PyTorch Dataset with on-the-fly tokenization (PhishingDataset)
 │   ├── train.py                  # Training loop, validation, model saving
-│   └── flare.py                  # Inference class (Flare)
+│   ├── flare.py                  # Inference class (Flare)
+│   └── evaluate.py               # Standalone evaluation script — loads saved model, runs test set, prints metrics
 ├── server/
 │   ├── main.py                   # Central server FastAPI app (POST /update, GET /round, GET /model)
 │   ├── aggregator.py             # FedAvg aggregation, round lifecycle, threading.Timer scheduler
@@ -82,6 +82,7 @@ Flare/
 │   └── schemas.py                # Pydantic schemas: PredictRequest/Response, FlagRequest/Response
 ├── saved_model/                  # Model checkpoints saved here after training
 ├── config.py                     # All hyperparameters and paths — single source of truth
+├── test_update.py                # Manual test script for the central server /update endpoint
 ├── requirements.txt
 └── README.md
 ```
@@ -102,8 +103,8 @@ Flare/
 | `VALIDATE_SIZE` | 0.5 | 50% of that → results in 80/10/10 split |
 | `SAVED_MODEL_DIR` | `<root>/saved_model/` | |
 | `FLAG_THRESHOLD` | 50 | Flagged emails needed to trigger local training |
-| `AGGREGATION_THRESHOLD` | 5 | Weight updates needed to trigger early aggregation |
-| `MIN_CLIENTS` | 2 | Minimum updates needed at deadline to aggregate (else skip round) |
+| `AGGREGATION_THRESHOLD` | 1 | Weight updates needed to trigger early aggregation |
+| `MIN_CLIENTS` | 1 | Minimum updates needed at deadline to aggregate (else skip round) |
 | `ROUND_TIMEOUT` | 86400 | Round deadline in seconds (24 hours) |
 | `CLIENT_PORT` | 8000 | Local client server port |
 | `CENTRAL_PORT` | 8001 | Central server port |
@@ -146,8 +147,9 @@ If the deadline passes with fewer than `MIN_CLIENTS` updates, the round is skipp
 ## Implementation Roadmap
 
 ### Phase 1 — Fix & Validate Base Model ✓
-- All 4 bugs fixed in `flare.py` and `extract.py`
-- Remaining: full evaluation metrics (accuracy, F1, precision, recall, confusion matrix)
+- All bugs fixed in `flare.py` and `extract.py`
+- Full evaluation metrics implemented (`model/evaluate.py`): accuracy, F1, precision, recall, confusion matrix
+- Pre-FL baseline (test set): Loss 0.1491 | Accuracy 0.9632 | Recall 0.9535 | F1 0.9633
 
 ### Phase 2 — Local Server ✓
 - `POST /predict` — inference on email text
@@ -187,26 +189,30 @@ If the deadline passes with fewer than `MIN_CLIENTS` updates, the round is skipp
 
 ## Running the Code
 
-All model scripts must be run from inside `model/` due to relative imports:
+All scripts are run from the **project root** using `python -m`:
 
 ```bash
-cd model
-python train.py      # full training pipeline
-python flare.py      # single inference test
-python extract.py    # inspect data pipeline
-```
+# Full training pipeline
+python -m model.train
 
-Run the central server from the project root:
+# Evaluate saved model on test set
+python -m model.evaluate
 
-```bash
-uvicorn server.main:app --host 0.0.0.0 --port 8001
-```
+# Single inference test
+python -m model.flare
 
-Run the local client server from the `client/` directory:
+# Inspect data pipeline
+python -m model.extract
+python -m model.dataset
 
-```bash
-cd client
-uvicorn main:app --host 0.0.0.0 --port 8000
+# Central aggregation server (port 8001)
+python -m uvicorn server.main:app --port 8001
+
+# Local client server (port 8000)
+python -m uvicorn client.main:app --port 8000
+
+# Manual test for the /update endpoint
+python test_update.py
 ```
 
 ---
