@@ -53,7 +53,6 @@ Raw email data never leaves the user's device. Only model weight updates are sen
 - **Local client server** (FastAPI) — fully built with inference, email flagging, local training pipeline, and model hot-reloading
 
 ### What Does Not Exist Yet
-- End-to-end federated loop: client does not yet send weight deltas to the central server after local training, and does not pull the updated global model back from central
 - Browser extension (SE team scope)
 
 ---
@@ -164,10 +163,10 @@ If the deadline passes with fewer than `MIN_CLIENTS` updates, the round is skipp
 - SQLite-backed round and weight update persistence
 - `threading.Timer` deadline scheduling with graceful restart on server boot
 
-### Phase 4 — Federated Loop (current priority)
-- After local training, serialize weight delta (local weights − global weights) and `POST /update` to central server
+### Phase 4 — Federated Loop ✓
+- After local training, weight delta (local weights − global weights) is serialized and `POST /update` to central server
 - After aggregation completes, client pulls updated global model from `GET /model` and hot-reloads
-- End-to-end round validated: flag → train → send delta → aggregate → pull → hot-reload
+- End-to-end round: flag → train → send delta → aggregate → pull → hot-reload
 
 ---
 
