@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flare</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 300px;
+      background: #111318;
+      color: #e2e4ea;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+      padding: 20px 16px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .brand {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: #fff;
+    }
+    .brand span { color: #f97316; }
+
+    #dashboardBtn {
+      background: none;
+      border: 1px solid #2a2d36;
+      color: #9ca3af;
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    #dashboardBtn:hover { border-color: #4b5563; color: #e2e4ea; }
+
+    /* ── Status circle ── */
+    .status-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .circle {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.3s, box-shadow 0.3s;
+      background: #1e2028;
+      box-shadow: 0 0 0 3px #2a2d36;
+    }
+    .circle.idle     { background: #1e2028; box-shadow: 0 0 0 3px #2a2d36; }
+    .circle.safe     { background: #14532d; box-shadow: 0 0 0 3px #16a34a; }
+    .circle.phishing { background: #450a0a; box-shadow: 0 0 0 3px #dc2626; }
+
+    .circle svg { width: 32px; height: 32px; }
+
+    .status-label {
+      font-size: 12px;
+      color: #6b7280;
+      text-align: center;
+      min-height: 16px;
+      transition: color 0.3s;
+    }
+    .status-label.safe     { color: #4ade80; }
+    .status-label.phishing { color: #f87171; }
+
+    /* ── Flag button ── */
+    #flagBtn {
+      display: none;
+      align-self: center;
+      background: none;
+      border: 1px solid #2a2d36;
+      color: #9ca3af;
+      font-size: 11px;
+      padding: 5px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+      margin-top: -6px;
+    }
+    #flagBtn:hover { border-color: #4b5563; color: #e2e4ea; }
+    #flagBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+    #flagBtn.visible { display: inline-block; }
+
+    /* ── Divider ── */
+    .divider {
+      height: 1px;
+      background: #1e2028;
+    }
+
+    /* ── Manual check section ── */
+    .manual-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+      color: #9ca3af;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 2px 0;
+    }
+    .manual-toggle:hover { color: #e2e4ea; }
+
+    .chevron {
+      width: 14px;
+      height: 14px;
+      transition: transform 0.2s;
+    }
+    .chevron.open { transform: rotate(180deg); }
+
+    .manual-body {
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .manual-body.open { display: flex; }
+
+    textarea#emailInput {
+      width: 100%;
+      height: 100px;
+      background: #1a1d24;
+      border: 1px solid #2a2d36;
+      border-radius: 8px;
+      color: #e2e4ea;
+      font-size: 12px;
+      padding: 8px 10px;
+      resize: vertical;
+      outline: none;
+      font-family: inherit;
+      transition: border-color 0.15s;
+      line-height: 1.5;
+    }
+    textarea#emailInput:focus { border-color: #4b5563; }
+    textarea#emailInput::placeholder { color: #4b5563; }
+
+    #assessBtn {
+      align-self: flex-end;
+      background: #f97316;
+      color: #fff;
+      border: none;
+      border-radius: 7px;
+      padding: 6px 16px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    #assessBtn:hover { background: #ea6c0a; }
+    #assessBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Footer ── */
+    .footer {
+      text-align: center;
+      color: #374151;
+      font-size: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="brand">FL<span>A</span>RE</div>
+    <button id="dashboardBtn">Dashboard</button>
+  </div>
+
+  <!-- Status indicator -->
+  <div class="status-wrap">
+    <div class="circle idle" id="statusCircle">
+      <svg id="iconCheck" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+        <polyline points="20 6 9 17 4 12"/>
+      </svg>
+      <svg id="iconX" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+        <line x1="18" y1="6" x2="6" y2="18"/>
+        <line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </div>
+    <div class="status-label" id="statusLabel">No scan yet</div>
+    <button id="flagBtn">Mark as Phishing</button>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Manual check -->
+  <div>
+    <div class="manual-toggle" id="manualToggle">
+      <span>Manual Check</span>
+      <svg class="chevron" id="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+    </div>
+    <div class="manual-body" id="manualBody">
+      <textarea id="emailInput" placeholder="Paste email content here…"></textarea>
+      <button id="assessBtn">Assess</button>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="footer">Flare &mdash; Phishing Detection</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

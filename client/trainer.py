@@ -12,9 +12,23 @@ import requests
 import torch
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
-from transformers import DistilBertForSequenceClassification, DistilBertTokenizer, DataCollatorWithPadding
+from transformers import (
+    DistilBertForSequenceClassification,
+    DistilBertTokenizer,
+    DataCollatorWithPadding,
+)
 
-from config import CLIENT_MODEL_DIR, BATCH_SIZE, LEARNING_RATE, LOCAL_EPOCHS, MAX_LENGTH, SERVER_HOST, CENTRAL_PORT, ROUND_TIMEOUT
+from config import (
+    CLIENT_MODEL_DIR,
+    BATCH_SIZE,
+    LEARNING_RATE,
+    LOCAL_EPOCHS,
+    MAX_LENGTH,
+    SERVER_HOST,
+    CENTRAL_PORT,
+    ROUND_TIMEOUT,
+    CLIENT_ID,
+)
 from .database import get_untrained_emails, mark_emails_trained
 from model.dataset import PhishingDataset
 
@@ -35,7 +49,6 @@ def _run_local_training(callback: Optional[Callable] = None):
     if not emails:
         return
 
-    user_id = emails[0].user_id
     num_samples = len(emails)
     email_ids = [e.id for e in emails]
     df = pd.DataFrame([{"body": e.body, "label": e.label} for e in emails])
@@ -49,7 +62,9 @@ def _run_local_training(callback: Optional[Callable] = None):
 
     dataset = PhishingDataset(df, tokenizer, max_length=MAX_LENGTH)
     collator = DataCollatorWithPadding(tokenizer=tokenizer)
-    loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collator)
+    loader = DataLoader(
+        dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collator
+    )
 
     optimizer = AdamW(model.parameters(), lr=LEARNING_RATE)
     model.train()
@@ -61,7 +76,9 @@ def _run_local_training(callback: Optional[Callable] = None):
             labels = batch["labels"].to(device)
 
             optimizer.zero_grad()
-            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+            outputs = model(
+                input_ids=input_ids, attention_mask=attention_mask, labels=labels
+            )
             outputs.loss.backward()
             optimizer.step()
 
@@ -71,7 +88,7 @@ def _run_local_training(callback: Optional[Callable] = None):
 
     response = requests.post(
         f"{SERVER_URL}/update",
-        json={"user_id": user_id, "weights": weights_b64, "num_samples": num_samples},
+        json={"user_id": CLIENT_ID, "weights": weights_b64, "num_samples": num_samples},
         timeout=30,
     )
     response.raise_for_status()
@@ -83,8 +100,10 @@ def _run_local_training(callback: Optional[Callable] = None):
     )
     global_model_response.raise_for_status()
 
-    model_path = Path(CLIENT_MODEL_DIR) / "model.safetensors"
-    with tempfile.NamedTemporaryFile(delete=False, dir=CLIENT_MODEL_DIR, suffix=".tmp") as tmp:
+    model_path = CLIENT_MODEL_DIR / "model.safetensors"
+    with tempfile.NamedTemporaryFile(
+        delete=False, dir=CLIENT_MODEL_DIR, suffix=".tmp"
+    ) as tmp:
         tmp_path = tmp.name
         for chunk in global_model_response.iter_content(chunk_size=8192):
             tmp.write(chunk)

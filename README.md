@@ -25,13 +25,19 @@ Flare is a graduation project. It is a hybrid federated learning system for phis
  - Stores user-flagged emails locally in SQLite
  - Triggers local training once N emails have been flagged
  - Sends weight updates to central server after local training
+ - Serves an admin dashboard (GET /dashboard) for monitoring flags and stats
 
         ↕  email text / prediction result
 
-[Browser Extension]
- - Sends email text to local server → displays phishing/benign result
- - Allows user to flag any email as phishing or benign
- - Built by the software engineering team (not AI team scope)
+[Browser Extension — Chrome MV3]
+ - Gmail content script auto-detects opened emails and sends text to local server
+ - Displays phishing warning popup on Gmail page when phishing is detected
+ - Extension popup shows status circle (idle/legitimate/phishing) with confidence
+ - Manual email check: collapsible text input to paste email content for assessment
+ - Flag correction: user can override a result (Mark as Phishing / Mark as Legitimate)
+ - Caches flag overrides locally so rescanning returns the corrected result
+ - Extension dashboard with flagged emails list and user settings (user ID)
+ - Persists last scan result and user preferences via chrome.storage.local
 ```
 
 ### Enterprise vs Individual — Same Flow
@@ -50,10 +56,8 @@ Raw email data never leaves the user's device. Only model weight updates are sen
 - ~10K labeled email dataset (columns: `body`, `label`) — used for initial model training
 - Inference class (`Flare`) — bugs fixed
 - **Central server** (FastAPI) — fully built with FedAvg aggregation, hybrid threshold/timeout round management, and SQLite-backed persistence
-- **Local client server** (FastAPI) — fully built with inference, email flagging, local training pipeline, and model hot-reloading
-
-### What Does Not Exist Yet
-- Browser extension (SE team scope)
+- **Local client server** (FastAPI) — fully built with inference, email flagging, local training pipeline, model hot-reloading, admin dashboard, and admin API endpoints
+- **Browser extension** (Chrome MV3) — Gmail content script with auto-detection, popup with status indicator and manual check, flag correction workflow, extension dashboard with settings
 
 ---
 
@@ -62,7 +66,12 @@ Raw email data never leaves the user's device. Only model weight updates are sen
 ```
 Flare/
 ├── data/
-│   └── raw_data.csv              # ~10K emails: columns = body (str), label (int: 0=benign, 1=phishing)
+│   ├── raw_data.csv              # ~10K emails: columns = body (str), label (int: 0=benign, 1=phishing)
+│   ├── AI_Model_Research/        # Research documents
+│   ├── Documentation_02_27_2026.odt
+│   ├── Test.ipynb
+│   └── backup/
+├── docs/                         # Additional project documentation
 ├── model/
 │   ├── extract.py                # Loads, cleans, splits data (Extract class)
 │   ├── dataset.py                # PyTorch Dataset with on-the-fly tokenization (PhishingDataset)
@@ -75,13 +84,25 @@ Flare/
 │   ├── database.py               # SQLAlchemy models: Round, WeightUpdate
 │   └── schemas.py                # Pydantic schemas: UpdateRequest, UpdateResponse, RoundResponse
 ├── client/
-│   ├── main.py                   # Local client FastAPI app (POST /predict, POST /flag)
+│   ├── main.py                   # Local client FastAPI app (POST /predict, POST /flag, GET /flagged, GET /dashboard, admin API)
 │   ├── trainer.py                # Local training pipeline — fine-tunes on flagged emails
-│   ├── database.py               # SQLAlchemy model: FlaggedEmail
-│   └── schemas.py                # Pydantic schemas: PredictRequest/Response, FlagRequest/Response
+│   ├── database.py               # SQLAlchemy model: FlaggedEmail + query helpers (per-user, all-users, stats)
+│   ├── schemas.py                # Pydantic schemas: PredictRequest/Response, FlagRequest/Response, FlaggedEmailRecord/Response
+│   └── admin_dashboard.html      # Admin dashboard served at GET /dashboard (overview stats, emails, settings)
+├── extention/
+│   ├── manifest.json             # Chrome MV3 manifest (popup, content script, background service worker)
+│   ├── popup.html                # Extension popup — status circle, flag button, manual check, dashboard link
+│   ├── popup.js                  # Popup logic — restore state from storage, assess, flag, live updates
+│   ├── background.js             # Service worker — handles predict/flag API calls, caches overrides
+│   ├── gmail_content.js          # Content script — detects opened emails, shows phishing warning popup
+│   ├── dashboard.html            # Extension dashboard — flagged emails table, settings (user ID)
+│   ├── dashboard.js              # Dashboard logic — fetch flagged emails, sidebar nav, user ID persistence
+│   ├── alert_popup.html          # Placeholder (unused)
+│   ├── hello_extensions.png      # Extension icon
+│   └── example.png               # Reference design for Gmail warning popup
 ├── saved_model/                  # Model checkpoints saved here after training
 ├── config.py                     # All hyperparameters and paths — single source of truth
-├── test_update.py                # Manual test script for the central server /update endpoint
+├── test_client.py                # Manual test script for the client server
 ├── requirements.txt
 └── README.md
 ```
@@ -101,18 +122,20 @@ Flare/
 | `TEST_SIZE` | 0.2 | 20% held out first |
 | `VALIDATE_SIZE` | 0.5 | 50% of that → results in 80/10/10 split |
 | `SAVED_MODEL_DIR` | `<root>/saved_model/` | |
+| `CLIENT_MODEL_DIR` | `<root>/client/saved_model/` | Client's local copy of the model |
 | `FLAG_THRESHOLD` | 50 | Flagged emails needed to trigger local training |
 | `AGGREGATION_THRESHOLD` | 1 | Weight updates needed to trigger early aggregation |
 | `MIN_CLIENTS` | 1 | Minimum updates needed at deadline to aggregate (else skip round) |
 | `ROUND_TIMEOUT` | 86400 | Round deadline in seconds (24 hours) |
 | `CLIENT_PORT` | 8000 | Local client server port |
 | `CENTRAL_PORT` | 8001 | Central server port |
+| `CLIENT_ID` | `test` | Default client identifier |
 
 ---
 
 ## Label Convention
 
-- `0` = BENIGN
+- `0` = BENIGN / LEGITIMATE
 - `1` = PHISHING
 
 ---
@@ -138,8 +161,37 @@ If the deadline passes with fewer than `MIN_CLIENTS` updates, the round is skipp
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/predict` | Run inference on an email. Body: `{body}`. Returns probabilities + predicted class. |
+| `POST` | `/predict` | Run inference on an email. Body: `{body}`. Returns `{legitimate, phishing, predicted, confidence}`. |
 | `POST` | `/flag` | Store a user-flagged email. Body: `{user_id, body, label}`. Triggers local training when flagged count hits `FLAG_THRESHOLD`. |
+| `GET` | `/flagged` | Get flagged emails for a user. Query: `?user_id=<id>`. Returns `{emails: [...]}`. |
+| `GET` | `/dashboard` | Serves the admin dashboard HTML page. |
+| `GET` | `/admin/users` | Returns a list of distinct user IDs that have flagged emails. |
+| `GET` | `/admin/flagged` | Get all flagged emails, optionally filtered. Query: `?user_id=<id>`. |
+| `GET` | `/admin/stats` | Time-series false positive/negative counts. Query: `?user_id=<id>&start=<date>&end=<date>`. |
+
+---
+
+## Browser Extension
+
+### Architecture
+- **Manifest V3** Chrome extension
+- **Service worker** (`background.js`) — handles all API communication with the local client server, caches flag overrides in `chrome.storage.local`
+- **Content script** (`gmail_content.js`) — injected on `mail.google.com`, detects email opens via URL hash + MutationObserver, sends email text to background, shows phishing warning popup on the Gmail page
+- **Popup** (`popup.html/js`) — status indicator circle (grey=idle, green=legitimate, red=phishing), flag correction button, collapsible manual email check input, dashboard link
+- **Dashboard** (`dashboard.html/js`) — sidebar navigation with Emails (flagged emails table with visual override dropdown) and Settings (user ID configuration)
+
+### Extension Permissions
+- `storage` — persists last scan result, user ID, and flag override cache
+
+---
+
+## Admin Dashboard
+
+Served by the client server at `GET /dashboard`. Three sections:
+
+- **Overview** — stat cards (total flags, false positives, false negatives) + Chart.js line graph of FP/FN over time. User dropdown (all users or specific) and time range selection (presets: 7d/30d/90d/All + custom date pickers).
+- **Emails** — table of all flagged emails with user, body preview, label badge, timestamp, and visual override dropdown. User dropdown filter.
+- **Settings** — LLM fallback configuration (provider dropdown, API key, confidence range for triggering LLM). UI only for now, not yet functional.
 
 ---
 
@@ -167,6 +219,21 @@ If the deadline passes with fewer than `MIN_CLIENTS` updates, the round is skipp
 - After local training, weight delta (local weights − global weights) is serialized and `POST /update` to central server
 - After aggregation completes, client pulls updated global model from `GET /model` and hot-reloads
 - End-to-end round: flag → train → send delta → aggregate → pull → hot-reload
+
+### Phase 5 — Browser Extension ✓
+- Gmail content script auto-detects opened emails and sends to local server
+- Phishing warning popup injected into Gmail page
+- Extension popup with status circle (idle/legitimate/phishing), confidence display
+- Manual email check via collapsible input
+- Flag correction (Mark as Phishing / Mark as Legitimate) with local caching
+- Extension dashboard with flagged emails and user ID settings
+- Admin dashboard on client server with overview stats, email browser, and settings
+
+### Phase 6 — Planned
+- Functional LLM fallback for low-confidence predictions
+- Automatic user ID assignment from client server to extensions
+- Admin dashboard override actions persisted to server
+- Central server admin dashboard for cross-client monitoring
 
 ---
 
@@ -210,8 +277,10 @@ python -m uvicorn server.main:app --port 8001
 # Local client server (port 8000)
 python -m uvicorn client.main:app --port 8000
 
-# Manual test for the /update endpoint
-python test_update.py
+# Admin dashboard available at http://localhost:8000/dashboard
+
+# Manual test for the client server
+python test_client.py
 ```
 
 ---
@@ -222,4 +291,6 @@ python test_update.py
 - DistilBERT (`distilbert-base-uncased`) — 67M parameters, 6-layer transformer
 - FastAPI + Uvicorn — both central and local servers
 - SQLAlchemy + SQLite — persistence for rounds, weight updates, and flagged emails
+- Chart.js — admin dashboard charting (loaded from CDN)
+- Chrome Extension Manifest V3 — browser integration
 - CUDA supported (torch+cu126 in requirements.txt)

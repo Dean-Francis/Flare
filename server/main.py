@@ -10,8 +10,12 @@ from fastapi.responses import StreamingResponse
 from . import aggregator
 from config import AGGREGATION_THRESHOLD, ROUND_TIMEOUT, SAVED_MODEL_DIR
 from .database import (
-    count_updates_for_round, create_round, get_open_round,
-    has_user_submitted, init_db, insert_weight_update,
+    count_updates_for_round,
+    create_round,
+    get_open_round,
+    has_user_submitted,
+    init_db,
+    insert_weight_update,
 )
 from .schemas import RoundResponse, UpdateRequest, UpdateResponse
 
@@ -78,7 +82,7 @@ async def get_model():
     event = aggregator.get_model_ready_event()
     await event.wait()
 
-    model_path = Path(SAVED_MODEL_DIR) / "model.safetensors"
+    model_path = SAVED_MODEL_DIR / "model.safetensors"
     if not model_path.exists():
         raise RuntimeError(f"Model file not found: {model_path}")
 

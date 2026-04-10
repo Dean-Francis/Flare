@@ -19,3 +19,12 @@ class FlagResponse(BaseModel):
     message: str
     count: int
     training_triggered: bool
+
+class FlaggedEmailRecord(BaseModel):
+    id: int
+    body: str
+    label: int
+    timestamp: str
+
+class FlaggedEmailsResponse(BaseModel):
+    emails: list[FlaggedEmailRecord]
