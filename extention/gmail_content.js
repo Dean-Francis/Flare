@@ -140,9 +140,7 @@ let emailId = null
 async function maybeCheckEmail() {
 	// Gmail URL changes without reload
 	let match = location.hash.match(/#inbox\/([^/]+)/);
-	if (!match) {
-		match = location.hash.match(/#spam\/([^/]+)/);
-	};
+	if (!match) match = location.hash.match(/#spam\/([^/]+)/);
 	if (!match) return;
 	if (emailId == match[1]) return;
 	emailId = match[1];
