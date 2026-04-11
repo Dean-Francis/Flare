@@ -1,0 +1,5 @@
+Suggested Improvements:
+  1 - Implement Differential Privacy to model (https://arxiv.org/abs/1710.06963)
+      -- Add a bound to delta, clients add random number within given bound and adds it to delta
+  2 - Implement Secure Aggregation to model (https://arxiv.org/abs/1902.01046)
+      -- Implementation will require cryptography, a bit tricky to implement
