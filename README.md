@@ -100,9 +100,19 @@ Flare/
 │   ├── alert_popup.html          # Placeholder (unused)
 │   ├── hello_extensions.png      # Extension icon
 │   └── example.png               # Reference design for Gmail warning popup
+├── tests/
+│   ├── conftest.py               # Shared fixtures: in-memory SQLite, stubbed Flare detector, FastAPI TestClient
+│   ├── unit/
+│   │   ├── test_aggregator.py    # FedAvg behavior (weighting, mismatched keys, single update)
+│   │   ├── test_client_database.py  # Insert/query helpers, confidence round-trip, trained flag, stats
+│   │   └── test_extract.py       # Data cleaning, 80/10/10 split, stratification, disjointness
+│   └── integration/
+│       └── test_client_api.py    # /predict, /flag, /flagged, /admin/*, /dashboard via TestClient
 ├── saved_model/                  # Model checkpoints saved here after training
 ├── config.py                     # All hyperparameters and paths — single source of truth
 ├── test_client.py                # Manual test script for the client server
+├── pytest.ini                    # Pytest config (testpaths=tests, pythonpath=., `integration` marker)
+├── pyrightconfig.json            # Pyright/Pylance type-checking config
 ├── requirements.txt
 └── README.md
 ```
@@ -123,7 +133,7 @@ Flare/
 | `VALIDATE_SIZE` | 0.5 | 50% of that → results in 80/10/10 split |
 | `SAVED_MODEL_DIR` | `<root>/saved_model/` | |
 | `CLIENT_MODEL_DIR` | `<root>/client/saved_model/` | Client's local copy of the model |
-| `FLAG_THRESHOLD` | 50 | Flagged emails needed to trigger local training |
+| `FLAG_THRESHOLD` | 50 | Untrained flagged emails needed to trigger local training (count resets as emails are marked trained) |
 | `AGGREGATION_THRESHOLD` | 1 | Weight updates needed to trigger early aggregation |
 | `MIN_CLIENTS` | 1 | Minimum updates needed at deadline to aggregate (else skip round) |
 | `ROUND_TIMEOUT` | 86400 | Round deadline in seconds (24 hours) |
@@ -162,12 +172,16 @@ If the deadline passes with fewer than `MIN_CLIENTS` updates, the round is skipp
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/predict` | Run inference on an email. Body: `{body}`. Returns `{legitimate, phishing, predicted, confidence}`. |
-| `POST` | `/flag` | Store a user-flagged email. Body: `{user_id, body, label}`. Triggers local training when flagged count hits `FLAG_THRESHOLD`. |
-| `GET` | `/flagged` | Get flagged emails for a user. Query: `?user_id=<id>`. Returns `{emails: [...]}`. |
+| `POST` | `/flag` | Store a user-flagged email. Body: `{user_id, body, label, confidence?}` (confidence is optional, captured from the model's prediction at flag time). Triggers local training when the untrained count hits `FLAG_THRESHOLD`. |
+| `GET` | `/flagged` | Get flagged emails for a user. Query: `?user_id=<id>`. Returns `{emails: [{id, body, label, timestamp, confidence}]}`. |
 | `GET` | `/dashboard` | Serves the admin dashboard HTML page. |
 | `GET` | `/admin/users` | Returns a list of distinct user IDs that have flagged emails. |
-| `GET` | `/admin/flagged` | Get all flagged emails, optionally filtered. Query: `?user_id=<id>`. |
+| `GET` | `/admin/flagged` | Get all flagged emails (with `confidence`), optionally filtered. Query: `?user_id=<id>`. |
 | `GET` | `/admin/stats` | Time-series false positive/negative counts. Query: `?user_id=<id>&start=<date>&end=<date>`. |
+
+### Startup and CORS Notes
+- **Lifespan startup** — DB init (`init_db`) and DistilBERT model load both run in the FastAPI `lifespan` context, so the model is in memory before the first request. Reloads after local training swap the detector atomically under a `threading.Lock`.
+- **CORS** — A `CORSMiddleware` allow-list of `chrome-extension://.*` (regex) lets the browser extension call the local API from any extension origin.
 
 ---
 
@@ -250,6 +264,30 @@ Served by the client server at `GET /dashboard`. Three sections:
 - **Current dataset**: `data/raw_data.csv` contains ~10K emails. Named entities replaced with bracketed placeholders (`[NAME]`, `[DATE]`, `[ADDRESS]`). Nearly balanced classes.
 - **Initial global model**: This 10K dataset is used to pre-train the first version of the global model distributed to users on install.
 - **Local training data**: User-flagged emails stored on-device. Distribution will be non-IID across clients (realistic — different users encounter different email patterns).
+
+---
+
+## Testing
+
+Pytest-based test suite under `tests/`, configured by `pytest.ini` (testpaths=tests, pythonpath=., custom `integration` marker, deprecation warnings silenced).
+
+### Fixtures (`tests/conftest.py`)
+- **`temp_client_db`** — monkeypatches `client.database.engine` / `SessionLocal` with an in-memory SQLite (StaticPool, single connection) so DB tests are fully isolated.
+- **`fake_flare`** — stubs `client.main.Flare` with a deterministic keyword detector (anything containing `phish` or `click here` returns phishing). Avoids loading the real DistilBERT model in tests.
+- **`api_client`** — composes the two above plus a no-op `run_local_training` patch, then yields a FastAPI `TestClient` against `client.main.app`.
+
+### What's Covered
+- **Unit — `tests/unit/test_aggregator.py`** — FedAvg correctness: single-update passthrough, equal-weight averaging, proportional weighting by `num_samples`, partial key mismatch tolerance, and all-mismatch raising `ValueError`. Uses a `TinyModel` (single `nn.Linear`) instead of DistilBERT.
+- **Unit — `tests/unit/test_client_database.py`** — insert/query helpers, per-user scoping, distinct user IDs, confidence round-trip (including null), `trained` flag transitions via `mark_emails_trained`, and FP/FN grouping in `get_flag_stats`.
+- **Unit — `tests/unit/test_extract.py`** — `Extract` cleaning (null drop, dedupe, label coercion), 80/10/10 split sizes, class stratification across splits, and split disjointness.
+- **Integration — `tests/integration/test_client_api.py`** — end-to-end against the FastAPI app: `/predict` response shape, `/flag` persistence with optional confidence, per-user `/flagged` scoping, `/admin/*` listing and stats, dashboard HTML response, 422 validation on bad `/flag` payloads, and `FLAG_THRESHOLD` lowered via monkeypatch to verify training is triggered.
+
+### Running
+```bash
+pytest                         # full suite
+pytest tests/unit              # unit only
+pytest -m integration          # marker-filtered
+```
 
 ---
 

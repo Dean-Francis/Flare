@@ -36,6 +36,11 @@ const emailTableBody = document.getElementById("emailTableBody");
 // In-memory overrides: id → label int (visual only, resets on reload)
 const localOverrides = {};
 
+// Cached data + sort state
+let cachedEmails = [];
+let sortKey = "timestamp";
+let sortDir = "desc";
+
 function labelText(label) {
   return label === 1 ? "phishing" : "legitimate";
 }
@@ -49,10 +54,49 @@ function formatTimestamp(iso) {
   });
 }
 
-function renderTable(emails) {
+function formatConfidence(c) {
+  if (c === null || c === undefined) return { text: "—", muted: true };
+  return { text: `${(c * 100).toFixed(1)}%`, muted: false };
+}
+
+function sortEmails(emails) {
+  const arr = [...emails];
+  arr.sort((a, b) => {
+    let av, bv;
+    if (sortKey === "confidence") {
+      av = a.confidence;
+      bv = b.confidence;
+      // Null values sink to the bottom regardless of direction
+      if (av === null || av === undefined) return 1;
+      if (bv === null || bv === undefined) return -1;
+    } else {
+      av = a.timestamp || "";
+      bv = b.timestamp || "";
+    }
+    if (av < bv) return sortDir === "asc" ? -1 : 1;
+    if (av > bv) return sortDir === "asc" ? 1 : -1;
+    return 0;
+  });
+  return arr;
+}
+
+function updateSortArrows() {
+  document.querySelectorAll("thead th.sortable").forEach((th) => {
+    const arrow = th.querySelector(".sort-arrow");
+    if (th.dataset.sort === sortKey) {
+      th.classList.add("active");
+      arrow.textContent = sortDir === "asc" ? "▲" : "▼";
+    } else {
+      th.classList.remove("active");
+      arrow.textContent = "";
+    }
+  });
+}
+
+function renderTable() {
   emailTableBody.innerHTML = "";
 
-  if (!emails || emails.length === 0) {
+  if (!cachedEmails || cachedEmails.length === 0) {
     emptyState.textContent = "No flagged emails yet.";
     emptyState.style.display = "";
     emailTable.style.display = "none";
@@ -62,13 +106,17 @@ function renderTable(emails) {
   emptyState.style.display = "none";
   emailTable.style.display = "";
 
-  for (const email of emails) {
+  const sorted = sortEmails(cachedEmails);
+
+  for (const email of sorted) {
     const effectiveLabel = localOverrides[email.id] ?? email.label;
     const labelStr = labelText(effectiveLabel);
+    const conf = formatConfidence(email.confidence);
 
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td class="cell-body" title="${escapeHtml(email.body)}">${escapeHtml(email.body)}</td>
+      <td class="cell-confidence${conf.muted ? " muted" : ""}">${conf.text}</td>
       <td><span class="badge ${labelStr}">${labelStr}</span></td>
       <td class="cell-time">${formatTimestamp(email.timestamp)}</td>
       <td>
@@ -85,7 +133,6 @@ function renderTable(emails) {
       localOverrides[email.id] = newLabel;
       select.classList.add("overridden");
 
-      // Update badge in the same row
       const badge = tr.querySelector(".badge");
       const newLabelStr = labelText(newLabel);
       badge.className = `badge ${newLabelStr}`;
@@ -104,6 +151,21 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+// Sortable headers
+document.querySelectorAll("thead th.sortable").forEach((th) => {
+  th.addEventListener("click", () => {
+    const key = th.dataset.sort;
+    if (sortKey === key) {
+      sortDir = sortDir === "asc" ? "desc" : "asc";
+    } else {
+      sortKey = key;
+      sortDir = "desc";
+    }
+    updateSortArrows();
+    renderTable();
+  });
+});
+
 function loadFlaggedEmails(userId) {
   emptyState.textContent = "Loading…";
   emptyState.style.display = "";
@@ -114,7 +176,11 @@ function loadFlaggedEmails(userId) {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
     })
-    .then((data) => renderTable(data.emails))
+    .then((data) => {
+      cachedEmails = data.emails || [];
+      updateSortArrows();
+      renderTable();
+    })
     .catch(() => {
       emptyState.textContent = "Could not reach the local server.";
       emptyState.style.display = "";

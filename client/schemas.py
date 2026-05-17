@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import Optional
 
 
 class PredictRequest(BaseModel):
@@ -14,6 +15,7 @@ class FlagRequest(BaseModel):
     user_id: str
     body: str
     label: int
+    confidence: Optional[float] = None
 
 class FlagResponse(BaseModel):
     message: str
@@ -25,6 +27,7 @@ class FlaggedEmailRecord(BaseModel):
     body: str
     label: int
     timestamp: str
+    confidence: Optional[float] = None
 
 class FlaggedEmailsResponse(BaseModel):
     emails: list[FlaggedEmailRecord]

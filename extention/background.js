@@ -10,11 +10,11 @@ async function callPredict(body) {
 	return res.json();
 }
 
-async function callFlag(user_id, body, label) {
+async function callFlag(user_id, body, label, confidence) {
 	const res = await fetch(`${API_BASE}/flag`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ user_id, body, label }),
+		body: JSON.stringify({ user_id, body, label, confidence }),
 	});
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	return res.json();
@@ -52,7 +52,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 			callPredict(emailBody)
 				.then((result) => {
-					const stored = { ...result, body: emailBody, cacheKey };
+					const stored = { ...result, body: emailBody, cacheKey, originalConfidence: result.confidence };
 					chrome.storage.local.set({ lastResult: stored });
 					chrome.tabs.sendMessage(sender.tab.id, {
 						type: "JUDGEMENT",
@@ -84,7 +84,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 			callPredict(emailBody)
 				.then((result) => {
-					const stored = { ...result, body: emailBody, cacheKey };
+					const stored = { ...result, body: emailBody, cacheKey, originalConfidence: result.confidence };
 					chrome.storage.local.set({ lastResult: stored });
 					sendResponse(stored);
 				})
@@ -101,14 +101,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 	if (msg.type === "FLAG_EMAIL") {
 		chrome.storage.local.get("userId", ({ userId }) => {
 			const user_id = userId || "anonymous";
-			callFlag(user_id, msg.body, msg.label)
+			callFlag(user_id, msg.body, msg.label, msg.originalConfidence ?? null)
 				.then((result) => {
-					// Cache the override so rescanning returns the corrected label
+					// Cache the override so rescanning returns the corrected label.
+					// Preserve originalConfidence so a re-override still records the underlying model confidence.
 					const overrideResult = {
 						predicted: msg.label === 1 ? "phishing" : "legitimate",
 						confidence: 1.0,
 						body: msg.body,
 						cacheKey: msg.cacheKey,
+						originalConfidence: msg.originalConfidence ?? null,
 					};
 					chrome.storage.local.set({
 						[msg.cacheKey]: overrideResult,

@@ -66,7 +66,7 @@ def predict(request: PredictRequest):
 
 @app.post("/flag", response_model=FlagResponse)
 def flag(request: FlagRequest):
-    insert_flagged_email(request.user_id, request.body, request.label)
+    insert_flagged_email(request.user_id, request.body, request.label, request.confidence)
     count = count_flagged_emails()
 
     training_triggered = count % FLAG_THRESHOLD == 0
@@ -89,7 +89,7 @@ def flagged(user_id: str):
     return FlaggedEmailsResponse(
         emails=[
             FlaggedEmailRecord(
-                id=r.id, body=r.body, label=r.label, timestamp=r.timestamp
+                id=r.id, body=r.body, label=r.label, timestamp=r.timestamp, confidence=r.confidence
             )
             for r in rows
         ]
@@ -111,6 +111,7 @@ def admin_flagged(user_id: Optional[str] = None):
             "body": r.body,
             "label": r.label,
             "timestamp": r.timestamp,
+            "confidence": r.confidence,
         }
         for r in rows
     ]

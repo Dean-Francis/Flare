@@ -161,6 +161,36 @@
 			white-space: nowrap;
 		}
 
+		thead th.sortable {
+			cursor: pointer;
+			user-select: none;
+			transition: color 0.12s;
+		}
+
+		thead th.sortable:hover {
+			color: #e2e4ea;
+		}
+
+		thead th.sortable.active {
+			color: #f97316;
+		}
+
+		.sort-arrow {
+			font-size: 9px;
+			margin-left: 4px;
+			opacity: 0.7;
+		}
+
+		.cell-confidence {
+			white-space: nowrap;
+			color: #9ca3af;
+			font-variant-numeric: tabular-nums;
+		}
+
+		.cell-confidence.muted {
+			color: #4b5563;
+		}
+
 		tbody tr {
 			transition: background 0.12s;
 		}
@@ -384,8 +414,9 @@
 						<thead>
 							<tr>
 								<th>Body</th>
+								<th class="sortable" data-sort="confidence">Confidence <span class="sort-arrow"></span></th>
 								<th>Label</th>
-								<th>Flagged</th>
+								<th class="sortable" data-sort="timestamp">Flagged <span class="sort-arrow">▼</span></th>
 								<th>Override</th>
 							</tr>
 						</thead>

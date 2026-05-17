@@ -72,11 +72,14 @@ flagBtn.addEventListener("click", () => {
 	flagBtn.disabled = true;
 	flagBtn.textContent = "Flagging…";
 
+	const originalConfidence = currentResult.originalConfidence ?? currentResult.confidence;
+
 	chrome.runtime.sendMessage({
 		type: "FLAG_EMAIL",
 		body: currentResult.body,
 		label: correctedLabel,
 		cacheKey: currentResult.cacheKey,
+		originalConfidence,
 	}, (response) => {
 		if (chrome.runtime.lastError || !response?.ok) {
 			flagBtn.disabled = false;
@@ -85,12 +88,13 @@ flagBtn.addEventListener("click", () => {
 			return;
 		}
 
-		// Flip the display to the corrected result
+		// Flip the display to the corrected result, preserving the original model confidence
 		const corrected = {
 			predicted: correctedLabel === 1 ? "phishing" : "legitimate",
 			confidence: 1.0,
 			body: currentResult.body,
 			cacheKey: currentResult.cacheKey,
+			originalConfidence,
 		};
 		setResult(corrected);
 		flagBtn.disabled = true;

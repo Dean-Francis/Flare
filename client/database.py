@@ -1,8 +1,9 @@
 from config import DATABASE_URL
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, func, distinct
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Float, func, distinct, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from datetime import datetime, timezone
 from dataclasses import dataclass
+from typing import Optional
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine)
@@ -19,6 +20,7 @@ class FlaggedEmail(Base):
     user_id = Column(String, nullable=False)
     body = Column(String, nullable=False)
     label = Column(Integer, nullable=False)
+    confidence = Column(Float, nullable=True)
     trained = Column(Boolean, default=False, nullable=False)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -30,15 +32,22 @@ class FlaggedEmailData:
     body: str
     label: int
     timestamp: str = ""
+    confidence: Optional[float] = None
 
 
 def init_db():
     Base.metadata.create_all(engine)
+    # Lightweight migration: add `confidence` to existing tables created before this column existed
+    with engine.connect() as conn:
+        cols = [row[1] for row in conn.execute(text("PRAGMA table_info(flagged_emails)"))]
+        if "confidence" not in cols:
+            conn.execute(text("ALTER TABLE flagged_emails ADD COLUMN confidence FLOAT"))
+            conn.commit()
 
 
-def insert_flagged_email(user_id: str, body: str, label: int):
+def insert_flagged_email(user_id: str, body: str, label: int, confidence: Optional[float] = None):
     with SessionLocal() as session:
-        session.add(FlaggedEmail(user_id=user_id, body=body, label=label))
+        session.add(FlaggedEmail(user_id=user_id, body=body, label=label, confidence=confidence))
         session.commit()
 
 
@@ -50,13 +59,13 @@ def count_flagged_emails() -> int:
 def get_untrained_emails() -> list[FlaggedEmailData]:
     with SessionLocal() as session:
         rows = session.query(FlaggedEmail).filter(FlaggedEmail.trained == False).all()
-        return [FlaggedEmailData(id=r.id, user_id=r.user_id, body=r.body, label=r.label, timestamp=r.timestamp.isoformat() if r.timestamp else "") for r in rows]
+        return [FlaggedEmailData(id=r.id, user_id=r.user_id, body=r.body, label=r.label, timestamp=r.timestamp.isoformat() if r.timestamp else "", confidence=r.confidence) for r in rows]
 
 
 def get_flagged_emails_by_user(user_id: str) -> list[FlaggedEmailData]:
     with SessionLocal() as session:
         rows = session.query(FlaggedEmail).filter(FlaggedEmail.user_id == user_id).order_by(FlaggedEmail.timestamp.desc()).all()
-        return [FlaggedEmailData(id=r.id, user_id=r.user_id, body=r.body, label=r.label, timestamp=r.timestamp.isoformat() if r.timestamp else "") for r in rows]
+        return [FlaggedEmailData(id=r.id, user_id=r.user_id, body=r.body, label=r.label, timestamp=r.timestamp.isoformat() if r.timestamp else "", confidence=r.confidence) for r in rows]
 
 
 def get_all_flagged_emails(user_id: str | None = None) -> list[FlaggedEmailData]:
@@ -65,7 +74,7 @@ def get_all_flagged_emails(user_id: str | None = None) -> list[FlaggedEmailData]
         if user_id:
             q = q.filter(FlaggedEmail.user_id == user_id)
         rows = q.order_by(FlaggedEmail.timestamp.desc()).all()
-        return [FlaggedEmailData(id=r.id, user_id=r.user_id, body=r.body, label=r.label, timestamp=r.timestamp.isoformat() if r.timestamp else "") for r in rows]
+        return [FlaggedEmailData(id=r.id, user_id=r.user_id, body=r.body, label=r.label, timestamp=r.timestamp.isoformat() if r.timestamp else "", confidence=r.confidence) for r in rows]
 
 
 def get_distinct_user_ids() -> list[str]:
